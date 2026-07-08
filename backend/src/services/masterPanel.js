@@ -506,9 +506,18 @@ class MasterPanelService {
           break;
 
         case 'edit':
+          // Fetch current details to preserve all existing values
+          let currentData = {};
+          try {
+            currentData = await this.getLineDetails(data.id);
+          } catch (err) {
+            logger.warn('Could not fetch current line details, proceeding with partial data', { lineId: data.id });
+          }
+          // Merge: current data as base, update data overrides
+          const mergedData = { ...currentData, ...data };
           url = `/manutLinhas/edit/${data.id}/1`;
           method = 'POST';
-          formData = this._buildLineFormData(data, true);
+          formData = this._buildLineFormData(mergedData, true);
           break;
 
         case 'delete':
