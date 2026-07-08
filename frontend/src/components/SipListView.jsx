@@ -125,7 +125,7 @@ function SipListView({ lines, onRefresh, onQuickCreate, creating }) {
         <div className="sip-toolbar-actions">
           <button className="sip-btn-create" onClick={onQuickCreate} disabled={creating}>
             <Zap size={16} />
-            <span>{creating ? 'Criando...' : 'Nova SIP'}</span>
+            <span>{creating ? 'Criando...' : 'Criar Usuário SIP'}</span>
           </button>
           <button className="sip-btn-refresh" onClick={onRefresh} title="Sincronizar">
             <RefreshCw size={16} />
