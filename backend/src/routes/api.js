@@ -159,14 +159,30 @@ router.get('/lines/:id/debug', async (req, res) => {
     // Check callerId input attributes
     const callerIdInputMatch = editHtml.match(/<input[^>]*id="txtCallerID"[^>]*>/i);
     
-    // 2. Now submit with CORRECT key names using actual executeAction
+    // 2. Extract JavaScript submit logic from the page
+    // Look for AJAX calls / URL patterns in inline scripts
+    const ajaxUrlMatches = editHtml.match(/["']([^"']*(?:edit|update|save|salvar)[^"']*)["']/gi);
+    const ajaxUrls = ajaxUrlMatches ? [...new Set(ajaxUrlMatches.map(u => u.replace(/["']/g, '')))].filter(u => !u.includes(' ')).slice(0, 10) : [];
+    
+    // Look for jQuery $.post or $.ajax calls related to edit
+    const postMatches = editHtml.match(/\$\.(?:post|ajax)\([^)]+\)/gi);
+    const ajaxCalls = postMatches ? postMatches.slice(0, 5) : [];
+    
+    // Look for any form submit handler
+    const submitHandlerMatch = editHtml.match(/(?:submit|onsubmit)[^;{]*{[^}]*}/gi);
+    
+    // Find the full form HTML to see if there are data-* attributes for AJAX
+    const formHtmlMatch = editHtml.match(/<form[\s\S]*?<\/form>/i);
+    const formHtml = formHtmlMatch ? formHtmlMatch[0].substring(0, 1000) : 'NOT FOUND';
+    
+    // 3. Now submit with CORRECT key names using actual executeAction
     const updateResult = await MasterPanel.executeAction('edit', {
       id: parseInt(lineId),
       callerId: '11900001111',
       callerIdName: 'DEBUG_BINA_ALTERADA',
     });
     
-    // 3. Re-fetch edit page to see if callerId changed
+    // 4. Re-fetch edit page to see if callerId changed
     const updatedHtml = await MasterPanel.fetchFromPanel(`/manutLinhas/edit/${lineId}`);
     const updatedCallerId = (() => {
       const re = new RegExp(`id="txtCallerID"[^>]*value="([^"]*)"`, 'i');
@@ -180,12 +196,16 @@ router.get('/lines/:id/debug', async (req, res) => {
       formMethod,
       currentFormFields: formFields,
       callerIdInputAttrs: callerIdInputMatch ? callerIdInputMatch[0] : 'NOT FOUND',
+      ajaxUrls,
+      ajaxCalls,
+      hasSubmitHandler: !!submitHandlerMatch,
       executeActionResult: {
         success: updateResult.success,
         message: updateResult.message,
         hasResponseText: typeof updateResult.response === 'string' && updateResult.response.length > 0,
       },
       updatedCallerId,
+      formHtmlLength: formHtml.length,
     });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
