@@ -122,7 +122,7 @@ router.post('/lines', async (req, res) => {
   }
 });
 
-// ======== DEBUG: Investigar por que o callerId nao persiste ========
+// ======== DEBUG: Investigar callerId + form action da edit page ========
 router.get('/lines/:id/debug', async (req, res) => {
   try {
     const lineId = req.params.id;
@@ -133,7 +133,15 @@ router.get('/lines/:id/debug', async (req, res) => {
     // 1. Fetch the edit page HTML
     const editHtml = await MasterPanel.fetchFromPanel(`/manutLinhas/edit/${lineId}`);
     
-    // Extract ALL form fields
+    // Find form action URL (tells us where to POST)
+    const formActionMatch = editHtml.match(/<form[^>]*action="([^"]+)"/i);
+    const formAction = formActionMatch ? formActionMatch[1] : 'NOT FOUND';
+    
+    // Find form method
+    const formMethodMatch = editHtml.match(/<form[^>]*method="([^"]+)"/i);
+    const formMethod = formMethodMatch ? formMethodMatch[1] : 'NOT FOUND';
+    
+    // Extract current field values
     const extractValue = (fieldId) => {
       const regex = new RegExp(`id="${fieldId}"[^>]*value="([^"]*)"`, 'i');
       const match = editHtml.match(regex);
@@ -148,55 +156,37 @@ router.get('/lines/:id/debug', async (req, res) => {
       txtCallerIDName: extractValue('txtCallerIDName'),
     };
     
-    // Check if txtCallerID input is disabled/readonly
-    const callerIdInputMatch = editHtml.match(/id="txtCallerID"[^>]*/i);
-    const callerIdInputAttrs = callerIdInputMatch ? callerIdInputMatch[0] : 'NOT FOUND';
+    // Check callerId input attributes
+    const callerIdInputMatch = editHtml.match(/<input[^>]*id="txtCallerID"[^>]*>/i);
     
-    // 2. Build raw form data and POST to master panel directly
-    const formData = MasterPanel._buildLineFormData({
-      ...formFields,
-      callerId: 'DEBUG_TEST_BINA_999',
-    }, true);
-    
-    // Direct axios call to see raw response
-    const axios = require('axios');
-    const https = require('https');
-    const rawClient = axios.create({
-      baseURL: 'https://sip.avoip.com.br',
-      timeout: 30000,
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+    // 2. Now submit with CORRECT key names using actual executeAction
+    const updateResult = await MasterPanel.executeAction('edit', {
+      id: parseInt(lineId),
+      callerId: '11900001111',
+      callerIdName: 'DEBUG_BINA_ALTERADA',
     });
-    
-    const rawResponse = await rawClient.post(
-      `/manutLinhas/edit/${lineId}`,
-      formData,
-      {
-        headers: {
-          'Cookie': MasterPanel._getCookieHeader(),
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
     
     // 3. Re-fetch edit page to see if callerId changed
     const updatedHtml = await MasterPanel.fetchFromPanel(`/manutLinhas/edit/${lineId}`);
-    const updatedCallerId = extractValueFromHtml(updatedHtml, 'txtCallerID');
+    const updatedCallerId = (() => {
+      const re = new RegExp(`id="txtCallerID"[^>]*value="([^"]*)"`, 'i');
+      const m = updatedHtml.match(re);
+      return m ? m[1] : null;
+    })();
     
     res.json({
       lineId,
+      formAction,
+      formMethod,
       currentFormFields: formFields,
-      callerIdInputAttrs,
-      formDataSent: formData.substring(0, 300),
-      rawResponseStatus: rawResponse.status,
-      rawResponseData: String(rawResponse.data).substring(0, 500),
+      callerIdInputAttrs: callerIdInputMatch ? callerIdInputMatch[0] : 'NOT FOUND',
+      executeActionResult: {
+        success: updateResult.success,
+        message: updateResult.message,
+        hasResponseText: typeof updateResult.response === 'string' && updateResult.response.length > 0,
+      },
       updatedCallerId,
     });
-    
-    function extractValueFromHtml(html, fieldId) {
-      const re = new RegExp(`id="${fieldId}"[^>]*value="([^"]*)"`, 'i');
-      const m = html.match(re);
-      return m ? m[1] : null;
-    }
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
