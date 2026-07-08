@@ -68,7 +68,7 @@ export default function SipTable({ lines, onRefresh, onSync, onQuickCreate, crea
     l.name?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const getCallerId = (line) => line.callerId || line.callerIdName || line.number || '—';
+  const getCallerId = (line) => line.callerId || line.callerIdName || '—';
 
   const handleAction = async (id, data) => {
     await linesApi.update(id, data);

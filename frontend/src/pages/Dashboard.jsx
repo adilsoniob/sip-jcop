@@ -14,20 +14,25 @@ export default function Dashboard() {
       const res = await linesApi.list();
       const linesData = res.data.lines || [];
 
-      // Auto-fetch real passwords in background
-      const linesToFetch = linesData.filter((l) => l.sipPassword === '****' || !l.sipPassword);
+      // Auto-fetch real passwords and BINA (callerId) in background
+      const linesToFetch = linesData.filter(
+        (l) => l.sipPassword === '****' || !l.sipPassword || !l.callerId
+      );
       if (linesToFetch.length > 0) {
         const results = await Promise.allSettled(
           linesToFetch.slice(0, 10).map((l) => linesApi.get(l.id))
         );
-        const passwordMap = {};
         results.forEach((r, i) => {
-          if (r.status === 'fulfilled' && r.value.data?.sipPassword) {
-            passwordMap[linesToFetch[i].id] = r.value.data.sipPassword;
+          if (r.status === 'fulfilled' && r.value.data) {
+            const data = r.value.data;
+            const lineId = linesToFetch[i].id;
+            const line = linesData.find((l) => l.id === lineId);
+            if (line) {
+              if (data.sipPassword) line.sipPassword = data.sipPassword;
+              if (data.callerId) line.callerId = data.callerId;
+              if (data.callerIdName) line.callerIdName = data.callerIdName;
+            }
           }
-        });
-        linesData.forEach((l) => {
-          if (passwordMap[l.id]) l.sipPassword = passwordMap[l.id];
         });
       }
 
