@@ -51,7 +51,10 @@ function LoginPage() {
       <div className="login-bg-shapes" />
       <div className="login-container">
         <div className="login-header">
-          <div className="login-logo">JCopSIP</div>
+          <div className="login-logo">
+            <img src="/logo-jcop.png" alt="JCOP" className="login-logo-img" />
+            <span className="login-logo-text">JCOP<span className="login-logo-sip">SIP</span></span>
+          </div>
           <div className="login-subtitle">Painel de Gerenciamento SIP</div>
         </div>
 

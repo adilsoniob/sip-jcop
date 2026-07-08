@@ -28,8 +28,8 @@ function TopBar({ user, onLogout }) {
     <header className="jc-topbar">
       <div className="jc-topbar-left">
         <div className="jc-logo">
-          <span className="jc-logo-icon">J</span>
-          <span className="jc-logo-text">JCopSIP</span>
+          <img src="/logo-jcop.png" alt="JCOP" className="jc-logo-img" />
+          <span className="jc-logo-text">JCOP<span className="jc-logo-sip">SIP</span></span>
         </div>
         <span className="jc-logo-sub">Painel de Gerenciamento SIP</span>
       </div>

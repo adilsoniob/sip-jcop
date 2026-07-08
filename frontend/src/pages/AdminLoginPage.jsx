@@ -59,10 +59,11 @@ function AdminLoginPage() {
       <div className="login-bg-shapes" />
       <div className="login-container">
         <div className="login-header">
-          <div className="login-logo" style={{ background: 'var(--gradient-warning)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-            Admin
+          <div className="login-logo">
+            <img src="/logo-jcop.png" alt="JCOP" className="login-logo-img admin-logo" />
+            <span className="login-logo-text">JCOP<span className="login-logo-sip">SIP</span></span>
           </div>
-          <div className="login-subtitle">Área Administrativa JCopSIP</div>
+          <div className="login-subtitle">Área Administrativa</div>
         </div>
 
         <div className="login-card">

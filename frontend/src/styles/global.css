@@ -531,13 +531,45 @@ body {
 }
 
 .login-logo {
-  font-size: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.login-logo-img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 18px;
+  filter: drop-shadow(0 4px 20px rgba(108, 92, 231, 0.4));
+  transition: var(--transition);
+  animation: logoFloat 3s ease-in-out infinite;
+}
+
+.login-logo-img.admin-logo {
+  filter: drop-shadow(0 4px 20px rgba(253, 203, 110, 0.4));
+}
+
+.login-logo-text {
+  font-size: 28px;
   font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: 2px;
+}
+
+.login-logo-sip {
   background: var(--gradient-primary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  margin-bottom: 8px;
+  font-weight: 900;
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
 }
 
 .login-subtitle {
