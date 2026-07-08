@@ -515,7 +515,7 @@ class MasterPanelService {
           }
           // Merge: current data as base, update data overrides
           const mergedData = { ...currentData, ...data };
-          url = `/manutLinhas/edit/${data.id}/1`;
+          url = `/manutLinhas/edit/${data.id}`;
           method = 'POST';
           formData = this._buildLineFormData(mergedData, true);
           break;

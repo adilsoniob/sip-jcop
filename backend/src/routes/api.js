@@ -194,57 +194,6 @@ router.get('/sip-lines', async (req, res) => {
   }
 });
 
-// ======== DEBUG: Raw edit page from master panel ========
-router.get('/lines/:id/debug', async (req, res) => {
-  try {
-    const lineId = req.params.id;
-    await masterPanel.ensureAuthenticated();
-    
-    // 1. Fetch the edit page HTML
-    const editHtml = await masterPanel.fetchFromPanel(`/manutLinhas/edit/${lineId}`);
-    
-    // Extract all form fields
-    const extractValue = (fieldId) => {
-      const regex = new RegExp(`id="${fieldId}"[^>]*value="([^"]*)"`, 'i');
-      const match = editHtml.match(regex);
-      return match ? match[1] : '(not found)';
-    };
-    
-    const formFields = {
-      txtUsuario: extractValue('txtUsuario'),
-      txtSenha: extractValue('txtSenha'),
-      txtLinhaIP: extractValue('txtLinhaIP'),
-      txtCallerID: extractValue('txtCallerID'),
-      txtCallerIDName: extractValue('txtCallerIDName'),
-    };
-    
-    // 2. Try submitting with a test callerId
-    const masterPanelLib = require('../services/masterPanel');
-    const testResult = await masterPanelLib.executeAction('edit', {
-      id: parseInt(lineId),
-      callerId: 'DEBUG_TEST_12345',
-    });
-    
-    // 3. Re-fetch to see if it changed
-    const updatedHtml = await masterPanelLib.fetchFromPanel(`/manutLinhas/edit/${lineId}`);
-    const updatedCallerId = (() => {
-      const re = new RegExp(`id="txtCallerID"[^>]*value="([^"]*)"`, 'i');
-      const m = updatedHtml.match(re);
-      return m ? m[1] : '(not found)';
-    })();
-    
-    res.json({
-      lineId,
-      currentFormFields: formFields,
-      editResult: testResult,
-      updatedCallerId,
-      snippet: editHtml.substring(editHtml.indexOf('txtCallerID') - 50, editHtml.indexOf('txtCallerID') + 100),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack });
-  }
-});
-
 router.get('/dashboard/timeline', async (req, res) => {
   res.json({
     labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul'],
