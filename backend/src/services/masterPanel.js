@@ -515,7 +515,9 @@ class MasterPanelService {
           }
           // Merge: current data as base, update data overrides
           const mergedData = { ...currentData, ...data };
-          url = `/manutLinhas/edit/${data.id}`;
+          // The master panel uses /update/{id} for saving edits (AJAX POST)
+          // /edit/{id} is only for fetching the form (GET)
+          url = `/manutLinhas/update/${data.id}?_rt=${Math.random()}`;
           method = 'POST';
           formData = this._buildLineFormData(mergedData, true);
           break;
