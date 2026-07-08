@@ -2,10 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { setNavigateToLogin } from './services/api';
-import { LogOut } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
+import AdminDashboard from './pages/AdminDashboard';
+import AdminLoginPage from './pages/AdminLoginPage';
+import UsersPage from './pages/UsersPage';
+import AdminLayout from './components/AdminLayout';
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -18,6 +22,8 @@ function ProtectedRoute({ children }) {
 }
 
 function TopBar({ user, onLogout }) {
+  const navigate = useNavigate();
+
   return (
     <header className="jc-topbar">
       <div className="jc-topbar-left">
@@ -28,6 +34,16 @@ function TopBar({ user, onLogout }) {
         <span className="jc-logo-sub">Painel de Gerenciamento SIP</span>
       </div>
       <div className="jc-topbar-right">
+        {user?.profile === 'admin' && (
+          <button
+            className="jc-btn-logout"
+            onClick={() => navigate('/admin')}
+            title="Administração"
+            style={{ color: 'var(--accent-warning)' }}
+          >
+            <Settings size={16} />
+          </button>
+        )}
         <div className="jc-user-badge">
           <span className="jc-user-avatar">{user?.username?.charAt(0).toUpperCase() || 'U'}</span>
           <div className="jc-user-info">
@@ -41,6 +57,20 @@ function TopBar({ user, onLogout }) {
       </div>
     </header>
   );
+}
+
+function AdminRoute({ children }) {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <Navigate to="/admin/login" replace />;
+  }
+
+  if (user.profile !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
 }
 
 function AppContent() {
@@ -64,6 +94,7 @@ function AppContent() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/admin/login" element={<AdminLoginPage />} />
       <Route
         path="/dashboard"
         element={
@@ -75,6 +106,26 @@ function AppContent() {
               </main>
             </div>
           </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminLayout>
+              <AdminDashboard />
+            </AdminLayout>
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/users"
+        element={
+          <AdminRoute>
+            <AdminLayout>
+              <UsersPage />
+            </AdminLayout>
+          </AdminRoute>
         }
       />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
