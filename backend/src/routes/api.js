@@ -122,6 +122,86 @@ router.post('/lines', async (req, res) => {
   }
 });
 
+// ======== DEBUG: Investigar por que o callerId nao persiste ========
+router.get('/lines/:id/debug', async (req, res) => {
+  try {
+    const lineId = req.params.id;
+    const MasterPanel = require('../services/masterPanel');
+    
+    await MasterPanel.ensureAuthenticated();
+    
+    // 1. Fetch the edit page HTML
+    const editHtml = await MasterPanel.fetchFromPanel(`/manutLinhas/edit/${lineId}`);
+    
+    // Extract ALL form fields
+    const extractValue = (fieldId) => {
+      const regex = new RegExp(`id="${fieldId}"[^>]*value="([^"]*)"`, 'i');
+      const match = editHtml.match(regex);
+      return match ? match[1] : null;
+    };
+    
+    const formFields = {
+      txtUsuario: extractValue('txtUsuario'),
+      txtSenha: extractValue('txtSenha'),
+      txtLinhaIP: extractValue('txtLinhaIP'),
+      txtCallerID: extractValue('txtCallerID'),
+      txtCallerIDName: extractValue('txtCallerIDName'),
+    };
+    
+    // Check if txtCallerID input is disabled/readonly
+    const callerIdInputMatch = editHtml.match(/id="txtCallerID"[^>]*/i);
+    const callerIdInputAttrs = callerIdInputMatch ? callerIdInputMatch[0] : 'NOT FOUND';
+    
+    // 2. Build raw form data and POST to master panel directly
+    const formData = MasterPanel._buildLineFormData({
+      ...formFields,
+      callerId: 'DEBUG_TEST_BINA_999',
+    }, true);
+    
+    // Direct axios call to see raw response
+    const axios = require('axios');
+    const https = require('https');
+    const rawClient = axios.create({
+      baseURL: 'https://sip.avoip.com.br',
+      timeout: 30000,
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+    });
+    
+    const rawResponse = await rawClient.post(
+      `/manutLinhas/edit/${lineId}`,
+      formData,
+      {
+        headers: {
+          'Cookie': MasterPanel._getCookieHeader(),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+    
+    // 3. Re-fetch edit page to see if callerId changed
+    const updatedHtml = await MasterPanel.fetchFromPanel(`/manutLinhas/edit/${lineId}`);
+    const updatedCallerId = extractValueFromHtml(updatedHtml, 'txtCallerID');
+    
+    res.json({
+      lineId,
+      currentFormFields: formFields,
+      callerIdInputAttrs,
+      formDataSent: formData.substring(0, 300),
+      rawResponseStatus: rawResponse.status,
+      rawResponseData: String(rawResponse.data).substring(0, 500),
+      updatedCallerId,
+    });
+    
+    function extractValueFromHtml(html, fieldId) {
+      const re = new RegExp(`id="${fieldId}"[^>]*value="([^"]*)"`, 'i');
+      const m = html.match(re);
+      return m ? m[1] : null;
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 router.put('/lines/:id', async (req, res) => {
   try {
     const { name, number, sipUser, sipPassword, callerId, callerIdName } = req.body;
