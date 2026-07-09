@@ -1,0 +1,45 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "nome": "Administrador",
+      "login": "admin",
+      "senha": "$2b$10$PoDjYNColLZDaQh1jG0IrexeL77xTkEchy6Af0r8wucw3AIttr0eW",
+      "perfil": "admin",
+      "status": "ativo",
+      "created_at": "2026-07-07T13:48:38.475Z",
+      "last_access": "2026-07-07T22:10:20.561Z"
+    },
+    {
+      "id": 3,
+      "nome": "Diihjcop",
+      "login": "jcop-sip",
+      "senha": "$2b$10$heEiToQFil5aLcrcBAjt0eXvPT/N4AE1MaVyTA/od2MjVVYgwQGnW",
+      "perfil": "operador",
+      "status": "ativo",
+      "created_at": "2026-07-07T13:52:39.379Z",
+      "last_access": "2026-07-07T22:08:20.923Z"
+    },
+    {
+      "id": 4,
+      "username": "admin",
+      "email": "admin@jcopsip.com",
+      "password_hash": "$2a$12$bGx7G3/fDVR6VdGZM9cNeeY2a79UWZC8RoaQb.BofzDoDu/wXskWm",
+      "profile": "admin",
+      "status": "active",
+      "created_at": "2026-07-07T22:29:24.882Z",
+      "last_access": "2026-07-08T01:42:50.423Z"
+    },
+    {
+      "id": 5,
+      "username": "operator",
+      "email": "operator@jcopsip.com",
+      "password_hash": "$2a$12$9nCIeUx9AKchfcpeRPn6seJz7GHizQalFlhTnmcBFusD.y4njbZKi",
+      "profile": "operator",
+      "status": "active",
+      "created_at": "2026-07-07T22:29:25.120Z",
+      "last_access": null
+    }
+  ],
+  "nextId": 6
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sip-jcop",
+  "outputDirectory": "frontend/dist",
+  "nodeVersion": "20.18.0"
+}
