@@ -1,7 +1,12 @@
 const axios = require('axios');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const config = require('../config/env');
 const logger = require('../utils/logger');
+
+const CACHE_FILE = path.join(__dirname, '..', '..', 'data', 'master-panel-cache.json');
+const SESSION_KEEPALIVE_INTERVAL = 4 * 60 * 1000; // 4 minutes (within the 5-min session window)
 
 class MasterPanelService {
   constructor() {
@@ -13,6 +18,11 @@ class MasterPanelService {
     this.maxRetries = 3;
     this._cachedLines = [];
     this._lastFetch = null;
+    this._keepAliveTimer = null;
+    this._loginPromise = null;
+
+    // Load persisted cache from disk
+    this._loadCache();
 
     this.client = axios.create({
       baseURL: config.masterPanel.url,
@@ -33,7 +43,7 @@ class MasterPanelService {
       (response) => response,
       async (error) => {
         if (error.response?.status === 302 || error.response?.status === 401) {
-          logger.warn('Master panel session expired, re-logging in');
+          logger.warn('Master panel session expired (302/401), re-logging in');
           await this.login(true);
           if (error.config) {
             error.config.headers['Cookie'] = this._getCookieHeader();
@@ -53,6 +63,70 @@ class MasterPanelService {
     );
   }
 
+  // ========== PERSISTENT CACHE ==========
+
+  _loadCache() {
+    try {
+      if (fs.existsSync(CACHE_FILE)) {
+        const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.cachedLines && Array.isArray(data.cachedLines)) {
+          this._cachedLines = data.cachedLines;
+          this._lastFetch = data.lastFetch || null;
+          logger.info(`Loaded ${this._cachedLines.length} cached lines from disk (persistent cache)`);
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to load master panel cache from disk', { error: err.message });
+    }
+  }
+
+  _saveCache() {
+    try {
+      const dir = path.dirname(CACHE_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(CACHE_FILE, JSON.stringify({
+        cachedLines: this._cachedLines,
+        lastFetch: this._lastFetch,
+        savedAt: new Date().toISOString(),
+      }, null, 2));
+    } catch (err) {
+      logger.warn('Failed to save master panel cache to disk', { error: err.message });
+    }
+  }
+
+  // ========== SESSION KEEP-ALIVE ==========
+
+  _startKeepAlive() {
+    this._stopKeepAlive();
+    this._keepAliveTimer = setInterval(async () => {
+      try {
+        logger.debug('Running session keep-alive ping');
+        // Use force=false to only re-login when the 5-min window expires.
+        // This avoids exhausting loginAttempts if the master panel is temporarily down.
+        await this.login(false);
+      } catch (err) {
+        // Keep-alive failures should NOT count toward the main retry limit.
+        // If a failure incremented loginAttempts, reset it so real requests can retry.
+        this.loginAttempts = 0;
+        logger.warn('Session keep-alive failed, will retry next cycle', { error: err.message });
+      }
+    }, SESSION_KEEPALIVE_INTERVAL);
+    // Don't let the timer keep the process alive
+    if (this._keepAliveTimer && this._keepAliveTimer.unref) {
+      this._keepAliveTimer.unref();
+    }
+  }
+
+  _stopKeepAlive() {
+    if (this._keepAliveTimer) {
+      clearInterval(this._keepAliveTimer);
+      this._keepAliveTimer = null;
+    }
+  }
+
+  // ========== AUTHENTICATION ==========
+
   _getCookieHeader() {
     if (!this.sessionCookie) return '';
     return `nextbilling_session=${this.sessionCookie}${this.ctrlSession ? `; ctrl_nextbilling_sess=${this.ctrlSession}` : ''}`;
@@ -65,17 +139,35 @@ class MasterPanelService {
     }
 
     if (this.loginAttempts >= this.maxRetries) {
+      logger.error('Max login retries reached for master panel');
       throw new Error('MAX_LOGIN_RETRIES');
     }
 
+    // Prevent concurrent login attempts using a shared promise
+    if (this._loginPromise) {
+      logger.debug('Login already in progress, waiting for result...');
+      return this._loginPromise;
+    }
+
+    this.loginAttempts++;
+
+    this._loginPromise = this._doLogin().finally(() => {
+      this._loginPromise = null;
+    });
+
+    return this._loginPromise;
+  }
+
+  async _doLogin() {
     try {
-      this.loginAttempts++;
+      logger.info('Attempting master panel login', { attempt: this.loginAttempts });
 
       const response = await this.client.post('/security/validate',
         `action=login&username=${encodeURIComponent(config.masterPanel.user)}&password=${encodeURIComponent(config.masterPanel.password)}`,
         {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           maxRedirects: 0,
+          timeout: 15000,
         }
       );
 
@@ -91,7 +183,7 @@ class MasterPanelService {
           }
         }
 
-        // Also follow the redirect to fully establish session
+        // Follow the redirect to fully establish session
         try {
           await this.client.post('/security/redirect', 'action=LOGIN', {
             headers: {
@@ -99,24 +191,46 @@ class MasterPanelService {
               'Cookie': this._getCookieHeader(),
             },
             maxRedirects: 2,
+            timeout: 10000,
           });
         } catch (e) {
-          // Redirect may cause 302/error — that's fine, session is set
+          // Redirect may cause 302/error — session is still set
         }
 
         this.isAuthenticated = true;
         this.lastLogin = Date.now();
         this.loginAttempts = 0;
         logger.info('Master panel login successful');
+
+        // Start session keep-alive
+        this._startKeepAlive();
+
+        // Auto-fetch lines in background after successful login
+        this._autoSyncAfterLogin();
+
         return true;
       }
 
       throw new Error(`Login failed: ${response.data?.msg || 'Unknown error'}`);
     } catch (err) {
       if (err.message === 'MAX_LOGIN_RETRIES') throw err;
-      logger.error('Master panel login error', { error: err.message });
+      logger.error('Master panel login error', { error: err.message, attempt: this.loginAttempts });
       this.isAuthenticated = false;
       throw err;
+    }
+  }
+
+  /**
+   * Auto-sync in background after a successful login, so the panel
+   * always has fresh data shortly after connecting.
+   */
+  async _autoSyncAfterLogin() {
+    try {
+      logger.info('Auto-sync: fetching lines after login...');
+      const result = await this.getLines();
+      logger.info(`Auto-sync completed: ${result.lines.length} lines fetched`);
+    } catch (err) {
+      logger.warn('Auto-sync after login failed (will retry on next request)', { error: err.message });
     }
   }
 
@@ -127,18 +241,37 @@ class MasterPanelService {
     return true;
   }
 
-  // ======== REAL DATA FETCHING FROM MASTER PANEL ========
+  // ========== DATA FETCHING WITH RETRY ==========
 
-  async fetchFromPanel(url) {
+  async fetchFromPanel(url, retries = 2) {
     await this.ensureAuthenticated();
-    const response = await this.client.get(url, {
-      headers: { 'Cookie': this._getCookieHeader() },
-    });
-    return response.data;
+
+    for (let attempt = 1; attempt <= retries + 1; attempt++) {
+      try {
+        const response = await this.client.get(url, {
+          headers: { 'Cookie': this._getCookieHeader() },
+          timeout: 20000,
+        });
+        return response.data;
+      } catch (err) {
+        const isLastAttempt = attempt > retries;
+        logger.warn(`fetchFromPanel attempt ${attempt}/${retries + 1} failed`, {
+          url,
+          error: err.message,
+          code: err.code,
+        });
+
+        if (isLastAttempt) throw err;
+
+        // Exponential backoff: 1s, 2s, 4s
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
 
   /**
-   * Get real line data from /manutLinhas/data endpoint
+   * Get real line data from /manutLinhas/data endpoint with automatic retry
    */
   async getLines(search = '', page = 1) {
     await this.ensureAuthenticated();
@@ -155,8 +288,19 @@ class MasterPanelService {
       const html = await this.fetchFromPanel(`/manutLinhas/data?${params.toString()}`);
       const lines = this._parseRealLineTable(html);
 
-      this._cachedLines = lines;
-      this._lastFetch = Date.now();
+      // Only update cache if we got real data (avoid overwriting with empty on HTML change)
+      if (lines.length > 0 || this._cachedLines.length === 0) {
+        this._cachedLines = lines;
+        this._lastFetch = Date.now();
+        // Persist to disk so cache survives restarts
+        this._saveCache();
+      } else {
+        logger.warn(`Parsed 0 lines from master panel — keeping previous cache (${this._cachedLines.length} lines)`);
+      }
+
+      if (lines.length > 0) {
+        logger.info(`Successfully fetched and parsed ${lines.length} lines from master panel`);
+      }
 
       return {
         lines,
@@ -165,12 +309,27 @@ class MasterPanelService {
         perPage: 50,
       };
     } catch (err) {
-      logger.error('Error fetching real lines from master panel', { error: err.message });
-      // Fall back to cached data
+      logger.error('Error fetching real lines from master panel', {
+        error: err.message,
+        code: err.code,
+        cachedLinesAvailable: this._cachedLines.length,
+      });
+
+      // Fall back to cached data (from disk, survives restarts)
       if (this._cachedLines.length > 0) {
-        logger.info('Returning cached line data');
-        return { lines: this._cachedLines, total: this._cachedLines.length, page, perPage: 50 };
+        const cacheAge = this._lastFetch ? Math.round((Date.now() - this._lastFetch) / 1000) : 'unknown';
+        logger.info(`Returning ${this._cachedLines.length} cached lines (cache age: ${cacheAge}s)`);
+        return {
+          lines: this._cachedLines,
+          total: this._cachedLines.length,
+          page,
+          perPage: 50,
+          cached: true,
+          cacheAge,
+        };
       }
+
+      // No cache available — throw so caller can fallback to dataStore
       throw new Error('FAILED_TO_FETCH_LINES');
     }
   }
@@ -190,23 +349,25 @@ class MasterPanelService {
     const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/i);
     if (!tbodyMatch) {
       logger.warn('Could not find tbody in /manutLinhas/data response');
+      // Debug: log first 500 chars of response to understand the structure
+      logger.debug('Response preview', { preview: html.substring(0, 500) });
       return lines;
     }
 
     const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let rowMatch;
-    
+
     while ((rowMatch = rowRegex.exec(tbodyMatch[1])) !== null) {
       const rowHtml = rowMatch[1];
-      
+
       // Extract all td cells
       const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
       const cellContents = [];
       let cellMatch;
       while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
-        cellContents.push(cellMatch[1]); // Use captured group content directly
+        cellContents.push(cellMatch[1]);
       }
-      
+
       if (cellContents.length < 3) continue;
 
       // Helper to strip remaining HTML tags from cell content
@@ -225,7 +386,7 @@ class MasterPanelService {
       const sipUser = stripHtml(cellContents[1]);
       const lineNumber = stripHtml(cellContents[2]);
       const recording = stripHtml(cellContents[4] || '');
-      
+
       // Determine status from the recording column
       const status = recording.toLowerCase() === 'ativo' ? 'active' : 'inactive';
 
@@ -306,17 +467,9 @@ class MasterPanelService {
   }
 
   /**
-   * Execute action on master panel (add/edit/delete line)
-   */
-  /**
-   * Build complete form data for master panel line operations.
-   * Uses all required fields from the real /manutLinhas/add form.
-   */
-  /**
    * Auto-generate a line number (7 digits)
    */
   _generateLineNumber() {
-    // Use timestamp last 7 digits + small random offset
     const ts = Date.now().toString();
     const base = parseInt(ts.slice(-5)) || Math.floor(Math.random() * 90000) + 10000;
     const rand = Math.floor(Math.random() * 900) + 100;
@@ -325,14 +478,13 @@ class MasterPanelService {
 
   /**
    * Generate a unique suffix for JCOPSIP_ prefix users.
-   * Uses HHmmss (6 digits) + 2 random digits for uniqueness.
    */
   _generateJcopsipSuffix() {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
     const ss = String(now.getSeconds()).padStart(2, '0');
-    const rand = String(Math.floor(Math.random() * 90) + 10); // 2 digits
+    const rand = String(Math.floor(Math.random() * 90) + 10);
     return `${hh}${mm}${ss}${rand}`;
   }
 
@@ -385,8 +537,8 @@ class MasterPanelService {
     params.set('txtTechPrefix', data.techPrefix || '');
 
     // General params
-    params.set('txtTipoTar', data.billingType || '1'); // 1=Saldo Master
-    params.set('txtTipo', data.functionality || '0'); // 0=LINHA IP
+    params.set('txtTipoTar', data.billingType || '1');
+    params.set('txtTipo', data.functionality || '0');
     params.set('txtTipoData', data.typeData || '');
     params.set('txtPerfilHorario', data.timeProfile || '0');
     params.set('txtAudio', data.audio || '0');
@@ -423,7 +575,7 @@ class MasterPanelService {
     params.set('txtSigameNOANSWER_ST', data.followMeNoAnswer || '0');
     params.set('txtSigameNOANSWER', data.followMeNoAnswerDest || '');
 
-    // BINA / Caller ID (requested feature)
+    // BINA / Caller ID
     params.set('txtCallerIDName', data.callerIdName || '');
     params.set('txtCallerID', data.callerId || data.number || '');
 
@@ -432,7 +584,6 @@ class MasterPanelService {
     params.set('txtRingTime', data.ringTime ?? '45');
     params.set('txtRingTimeIP', data.ringTimeIP ?? '30');
     params.set('txtCallTime', data.callTime ?? '7200');
-    // Auto-generate line number if not provided
     const lineNumber = data.lineNumber || data.number || this._generateLineNumber();
     params.set('txtLinhaIP', lineNumber);
     params.set('txtVOIP', data.ipxip ?? '1');
@@ -506,17 +657,13 @@ class MasterPanelService {
           break;
 
         case 'edit':
-          // Fetch current details to preserve all existing values
           let currentData = {};
           try {
             currentData = await this.getLineDetails(data.id);
           } catch (err) {
             logger.warn('Could not fetch current line details, proceeding with partial data', { lineId: data.id });
           }
-          // Merge: current data as base, update data overrides
           const mergedData = { ...currentData, ...data };
-          // The master panel uses /update/{id} for saving edits (AJAX POST)
-          // /edit/{id} is only for fetching the form (GET)
           url = `/manutLinhas/update/${data.id}?_rt=${Math.random()}`;
           method = 'POST';
           formData = this._buildLineFormData(mergedData, true);
@@ -541,7 +688,6 @@ class MasterPanelService {
         data: formData,
       });
 
-      // Parse response - the master panel returns JSON like {success: true, msg: "..."}
       let result;
       try {
         result = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
@@ -549,7 +695,6 @@ class MasterPanelService {
         result = { success: true };
       }
 
-      // Extract generated line number from form data for 'add' actions
       let generatedLineNumber = null;
       if (formData) {
         const lineNumMatch = formData.match(/txtLinhaIP=([^&]+)/);
@@ -576,11 +721,13 @@ class MasterPanelService {
   }
 
   /**
-   * Force re-sync by clearing cache
+   * Force re-sync by clearing cache and fetching fresh data
    */
   async sync() {
+    logger.info('Manual sync requested — clearing cache and fetching fresh lines');
     this._cachedLines = [];
     const linesResult = await this.getLines();
+    logger.info(`Sync completed: ${linesResult.lines.length} lines`);
     return {
       linesCount: linesResult.lines.length,
       lastSync: new Date().toISOString(),
@@ -593,7 +740,25 @@ class MasterPanelService {
       lastLogin: this.lastLogin,
       loginAttempts: this.loginAttempts,
       cachedLines: this._cachedLines.length,
+      cachePersisted: fs.existsSync(CACHE_FILE),
+      keepAliveActive: !!this._keepAliveTimer,
     };
+  }
+
+  /**
+   * Clean up resources (call on shutdown)
+   */
+  async destroy() {
+    this._stopKeepAlive();
+    try {
+      await this.client.get('/security/logout').catch(() => {});
+    } catch {
+      // Ignore
+    }
+    this.sessionCookie = null;
+    this.ctrlSession = null;
+    this.isAuthenticated = false;
+    logger.info('Master panel service destroyed');
   }
 }
 

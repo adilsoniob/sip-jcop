@@ -135,7 +135,7 @@ export default function SipTable({ lines, onRefresh, onSync, onQuickCreate, crea
             <tbody>
               {filtered.map((line) => (
                 <tr key={line.id}>
-                  <td className="sip-cell-name">{line.name || line.sipUser}</td>
+                  <td className="sip-cell-name">sip.avoip.com.br</td>
                   <td className="sip-cell-mono">{line.sipUser}</td>
                   <td className="sip-cell-pass">
                     {line.sipPassword && line.sipPassword !== '****'

@@ -4,7 +4,7 @@ import { X, Eye, EyeOff, Save, Phone } from 'lucide-react';
 function LineModal({ line, onClose, onSave }) {
   const isEditing = !!line;
   const [form, setForm] = useState({
-    name: '',
+    name: 'sip.avoip.com.br',
     number: '',
     sipUser: '',
     sipPassword: '',
@@ -24,7 +24,7 @@ function LineModal({ line, onClose, onSave }) {
         sipUser: line.sipUser || '',
         sipPassword: line.sipPassword || '',
         callerId: line.callerId || line.number || '',
-        callerIdName: line.callerIdName || line.name || '',
+        callerIdName: line.callerIdName || line.sipUser || '',
       });
       // Show loading state when password is being fetched
       if (line.loadingPassword) {
@@ -54,7 +54,7 @@ function LineModal({ line, onClose, onSave }) {
       sipUser: form.sipUser,
       sipPassword: form.sipPassword,
       callerId: form.callerId || form.number,
-      callerIdName: form.callerIdName || form.name,
+      callerIdName: form.callerIdName || form.sipUser,
     };
 
     if (isEditing && !data.sipPassword) {
@@ -84,11 +84,11 @@ function LineModal({ line, onClose, onSave }) {
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             <div className="form-group">
-              <label className="form-label">Nome da Linha</label>
+              <label className="form-label">Servidor Proxy</label>
               <input
                 type="text"
                 className={`form-input ${errors.name ? 'error' : ''}`}
-                placeholder="Ex: Ramal Comercial 1"
+                placeholder="Ex: sip.avoip.com.br"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 autoFocus
