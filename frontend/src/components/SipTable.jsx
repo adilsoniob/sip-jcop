@@ -125,7 +125,7 @@ export default function SipTable({ lines, onRefresh, onSync, onQuickCreate, crea
           <table className="sip-table">
             <thead>
               <tr>
-                <th>Nome</th>
+                <th>Servidor Proxy</th>
                 <th>Usuário SIP</th>
                 <th>Senha SIP</th>
                 <th>BINA</th>
