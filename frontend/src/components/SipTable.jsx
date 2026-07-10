@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Key, Phone, Trash2, Save, X, Search, Smartphone, RefreshCw } from 'lucide-react';
+import { User, Key, Phone, Trash2, Save, X, Search, Smartphone, RefreshCw, Image } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { linesApi } from '../services/api';
 
@@ -113,7 +113,7 @@ export default function SipTable({ lines, onRefresh, onSync, onQuickCreate, crea
         </div>
       </div>
 
-      {/* Table */}
+      {/* Table + Example Image side by side */}
       {filtered.length === 0 ? (
         <div className="sip-empty-state">
           <Smartphone size={40} />
@@ -121,46 +121,70 @@ export default function SipTable({ lines, onRefresh, onSync, onQuickCreate, crea
           <p>{search ? 'Tente alterar sua busca' : 'Clique em "Criar Usuário SIP" para começar'}</p>
         </div>
       ) : (
-        <div className="sip-table-wrap">
-          <table className="sip-table">
-            <thead>
-              <tr>
-                <th>Servidor Proxy</th>
-                <th>Usuário SIP</th>
-                <th>Senha SIP</th>
-                <th>BINA</th>
-                <th className="sip-th-actions">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((line) => (
-                <tr key={line.id}>
-                  <td className="sip-cell-name">sip.avoip.com.br</td>
-                  <td className="sip-cell-mono">{line.sipUser}</td>
-                  <td className="sip-cell-pass">
-                    {line.sipPassword && line.sipPassword !== '****'
-                      ? line.sipPassword
-                      : '—'}
-                  </td>
-                  <td className="sip-cell-mono">{getCallerId(line)}</td>
-                  <td className="sip-cell-actions">
-                    <button className="sip-act sip-act-user" onClick={() => setActionModal({ type: 'sipUser', line })} title="Alterar Usuário">
-                      <User size={13} /> Usuário
-                    </button>
-                    <button className="sip-act sip-act-pass" onClick={() => setActionModal({ type: 'sipPassword', line })} title="Alterar Senha">
-                      <Key size={13} /> Senha
-                    </button>
-                    <button className="sip-act sip-act-bina" onClick={() => setActionModal({ type: 'bina', line })} title="Alterar BINA">
-                      <Phone size={13} /> BINA
-                    </button>
-                    <button className="sip-act sip-act-del" onClick={() => handleDelete(line)} title="Excluir">
-                      <Trash2 size={13} /> Excluir
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="sip-layout">
+          <div className="sip-layout-table">
+            <div className="sip-table-wrap">
+              <table className="sip-table">
+                <thead>
+                  <tr>
+                    <th>Servidor Proxy</th>
+                    <th>Usuário SIP</th>
+                    <th>Senha SIP</th>
+                    <th>BINA</th>
+                    <th className="sip-th-actions">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((line) => (
+                    <tr key={line.id}>
+                      <td className="sip-cell-name">sip.avoip.com.br</td>
+                      <td className="sip-cell-mono">{line.sipUser}</td>
+                      <td className="sip-cell-pass">
+                        {line.sipPassword && line.sipPassword !== '****'
+                          ? line.sipPassword
+                          : '—'}
+                      </td>
+                      <td className="sip-cell-mono">{getCallerId(line)}</td>
+                      <td className="sip-cell-actions">
+                        <button className="sip-act sip-act-user" onClick={() => setActionModal({ type: 'sipUser', line })} title="Alterar Usuário">
+                          <User size={13} /> Usuário
+                        </button>
+                        <button className="sip-act sip-act-pass" onClick={() => setActionModal({ type: 'sipPassword', line })} title="Alterar Senha">
+                          <Key size={13} /> Senha
+                        </button>
+                        <button className="sip-act sip-act-bina" onClick={() => setActionModal({ type: 'bina', line })} title="Alterar BINA">
+                          <Phone size={13} /> BINA
+                        </button>
+                        <button className="sip-act sip-act-del" onClick={() => handleDelete(line)} title="Excluir">
+                          <Trash2 size={13} /> Excluir
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Example Image Sidebar */}
+          <div className="sip-layout-example">
+            <div className="example-card">
+              <div className="example-card-header">
+                <Image size={16} />
+                <span>Exemplo</span>
+              </div>
+              <a href="/EXEMPLO.png" target="_blank" rel="noopener noreferrer" title="Clique para ampliar">
+                <img
+                  src="/EXEMPLO.png"
+                  alt="Exemplo de onde inserir as informações"
+                  className="example-card-image"
+                />
+              </a>
+              <div className="example-card-caption">
+                <strong>Exemplo:</strong> Preencha os campos <strong>Usuário SIP</strong>, <strong>Senha SIP</strong> e <strong>BINA</strong> conforme indicado na imagem acima.
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
