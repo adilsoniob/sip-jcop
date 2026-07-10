@@ -21,6 +21,13 @@ class MasterPanelService {
     this._keepAliveTimer = null;
     this._loginPromise = null;
 
+    // Circuit breaker
+    this._consecutiveFailures = 0;
+    this._circuitOpen = false;
+    this._circuitOpenSince = null;
+    this._maxConsecutiveFailures = 5;
+    this._circuitTimeout = 5 * 60 * 1000; // 5 minutes
+
     // Load persisted cache from disk
     this._loadCache();
 
@@ -102,12 +109,11 @@ class MasterPanelService {
     this._keepAliveTimer = setInterval(async () => {
       try {
         logger.debug('Running session keep-alive ping');
-        // Use force=false to only re-login when the 5-min window expires.
-        // This avoids exhausting loginAttempts if the master panel is temporarily down.
-        await this.login(false);
+        // force=true to actually refresh the session before it expires.
+        // The catch block resets loginAttempts, so failures won't accumulate.
+        await this.login(true);
       } catch (err) {
         // Keep-alive failures should NOT count toward the main retry limit.
-        // If a failure incremented loginAttempts, reset it so real requests can retry.
         this.loginAttempts = 0;
         logger.warn('Session keep-alive failed, will retry next cycle', { error: err.message });
       }
@@ -241,6 +247,39 @@ class MasterPanelService {
     return true;
   }
 
+  // ========== CIRCUIT BREAKER ==========
+
+  _isCircuitOpen() {
+    if (!this._circuitOpen) return false;
+    const elapsed = Date.now() - this._circuitOpenSince;
+    if (elapsed >= this._circuitTimeout) {
+      // Half-open: allow one probe request
+      this._circuitOpen = false;
+      this._circuitOpenSince = null;
+      logger.info('Circuit half-open — allowing probe request to master panel');
+      return false;
+    }
+    return true;
+  }
+
+  _recordFailure() {
+    this._consecutiveFailures++;
+    if (this._consecutiveFailures >= this._maxConsecutiveFailures && !this._circuitOpen) {
+      this._circuitOpen = true;
+      this._circuitOpenSince = Date.now();
+      logger.warn(`Circuit OPEN after ${this._consecutiveFailures} consecutive failures — serving cached data for ${this._circuitTimeout / 1000}s`);
+    }
+  }
+
+  _recordSuccess() {
+    if (this._consecutiveFailures > 0 || this._circuitOpen) {
+      logger.info(`Master panel recovered after ${this._consecutiveFailures} failures — circuit CLOSED`);
+    }
+    this._consecutiveFailures = 0;
+    this._circuitOpen = false;
+    this._circuitOpenSince = null;
+  }
+
   // ========== DATA FETCHING WITH RETRY ==========
 
   async fetchFromPanel(url, retries = 2) {
@@ -252,6 +291,8 @@ class MasterPanelService {
           headers: { 'Cookie': this._getCookieHeader() },
           timeout: 20000,
         });
+        // Success — record it
+        this._recordSuccess();
         return response.data;
       } catch (err) {
         const isLastAttempt = attempt > retries;
@@ -261,7 +302,15 @@ class MasterPanelService {
           code: err.code,
         });
 
-        if (isLastAttempt) throw err;
+        if (isLastAttempt) {
+          // After exhausting all retries, invalidate the session so the next
+          // request triggers a fresh login instead of reusing stale cookies.
+          // This is the key fix: without it, isAuthenticated stays true even
+          // after the master panel rejects the session, and no recovery happens.
+          this.isAuthenticated = false;
+          this._recordFailure();
+          throw err;
+        }
 
         // Exponential backoff: 1s, 2s, 4s
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
@@ -274,6 +323,18 @@ class MasterPanelService {
    * Get real line data from /manutLinhas/data endpoint with automatic retry
    */
   async getLines(search = '', page = 1) {
+    // Circuit breaker: if the panel has been failing, serve cache immediately
+    if (this._isCircuitOpen()) {
+      if (this._cachedLines.length > 0) {
+        const cacheAge = this._lastFetch ? Math.round((Date.now() - this._lastFetch) / 1000) : 'unknown';
+        logger.warn(`Circuit open — returning ${this._cachedLines.length} cached lines immediately (age: ${cacheAge}s)`);
+        return { lines: this._cachedLines, total: this._cachedLines.length, page, perPage: 50, cached: true, cacheAge, circuitOpen: true };
+      }
+      // If no cache even with circuit open, force half-open probe
+      this._circuitOpen = false;
+      this._circuitOpenSince = null;
+    }
+
     await this.ensureAuthenticated();
 
     try {
@@ -742,6 +803,8 @@ class MasterPanelService {
       cachedLines: this._cachedLines.length,
       cachePersisted: fs.existsSync(CACHE_FILE),
       keepAliveActive: !!this._keepAliveTimer,
+      circuitOpen: this._circuitOpen,
+      consecutiveFailures: this._consecutiveFailures,
     };
   }
 
